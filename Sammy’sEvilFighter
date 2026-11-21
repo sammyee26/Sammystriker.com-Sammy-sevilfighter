@@ -1,0 +1,421 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sammy's Evil Fighter</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #080e1d;
+  color: white;
+  font-family: Arial, sans-serif;
+  text-align: center;
+}
+h1 { color: #ff5252; }
+canvas {
+  display: block;
+  width: min(96vw, 900px);
+  height: auto;
+  margin: 10px auto;
+  border: 3px solid #4d90ff;
+  background: #17283f;
+  cursor: crosshair;
+  touch-action: none;
+}
+button {
+  padding: 12px 20px;
+  margin: 5px;
+  background: #2563eb;
+  color: white;
+  border: 0;
+  border-radius: 8px;
+  font-weight: bold;
+  cursor: pointer;
+}
+button:hover { background: #3b82f6; }
+#status { margin: 10px; }
+</style>
+</head>
+<body>
+<h1>SAMMY'S EVIL FIGHTER</h1>
+<p>ON-RAILS ARCADE SHOOTER</p>
+
+<div id="status">Press START GAME!</div>
+<canvas id="game" width="900" height="500"></canvas>
+
+<button onclick="startGame()">START GAME</button>
+<button onclick="reload()">RELOAD (R)</button>
+<button onclick="togglePreservation()">PRESERVATION MODE</button>
+
+<p>Move your mouse to aim. Click or tap to shoot. Press R to reload.</p>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const statusText = document.getElementById("status");
+
+let running = false;
+let preservation = false;
+let score = 0;
+let health = 100;
+let ammo = 12;
+let maxAmmo = 12;
+let stage = 1;
+let kills = 0;
+let targets = [];
+let particles = [];
+let crosshair = { x: 450, y: 250 };
+let camera = 0;
+let spawnTimer = 0;
+let lastTime = 0;
+let boss = null;
+
+function startGame() {
+  running = true;
+  score = 0;
+  health = 100;
+  ammo = maxAmmo;
+  stage = 1;
+  kills = 0;
+  targets = [];
+  particles = [];
+  camera = 0;
+  spawnTimer = 0;
+  boss = null;
+  lastTime = performance.now();
+  requestAnimationFrame(loop);
+}
+
+function reload() {
+  if (running) ammo = maxAmmo;
+}
+
+function togglePreservation() {
+  preservation = !preservation;
+  alert(
+    "Classic visual mode: " +
+    (preservation ? "ON" : "OFF")
+  );
+}
+
+function addTarget() {
+  targets.push({
+    x: 950,
+    y: 100 + Math.random() * 290,
+    radius: 24,
+    speed: 80 + stage * 15,
+    hp: 1
+  });
+}
+
+function createBoss() {
+  boss = {
+    x: 700,
+    y: 240,
+    radius: 65,
+    hp: 30,
+    maxHp: 30,
+    phase: 0
+  };
+}
+
+function getPointer(event) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: (event.clientX - rect.left) * canvas.width / rect.width,
+    y: (event.clientY - rect.top) * canvas.height / rect.height
+  };
+}
+
+canvas.addEventListener("pointermove", e => {
+  crosshair = getPointer(e);
+});
+
+canvas.addEventListener("pointerdown", e => {
+  crosshair = getPointer(e);
+  shoot();
+});
+
+window.addEventListener("keydown", e => {
+  if (e.key.toLowerCase() === "r") reload();
+});
+
+function shoot() {
+  if (!running || ammo <= 0) return;
+  ammo--;
+
+  let hit = false;
+
+  if (boss) {
+    const distance = Math.hypot(
+      crosshair.x - boss.x,
+      crosshair.y - boss.y
+    );
+    if (distance < boss.radius) {
+      boss.hp--;
+      score += 100;
+      burst(crosshair.x, crosshair.y);
+      hit = true;
+
+      if (boss.hp <= 0) {
+        score += 5000;
+        boss = null;
+        winGame();
+      }
+    }
+  }
+
+  if (!hit) {
+    for (let i = targets.length - 1; i >= 0; i--) {
+      const t = targets[i];
+      const distance = Math.hypot(
+        crosshair.x - t.x,
+        crosshair.y - t.y
+      );
+
+      if (distance < t.radius) {
+        targets.splice(i, 1);
+        score += 100;
+        kills++;
+        burst(t.x, t.y);
+        hit = true;
+        break;
+      }
+    }
+  }
+
+  if (ammo === 0) {
+    statusText.textContent = "RELOAD! Press R";
+  }
+}
+
+function burst(x, y) {
+  for (let i = 0; i < 12; i++) {
+    particles.push({
+      x, y,
+      vx: (Math.random() - 0.5) * 220,
+      vy: (Math.random() - 0.5) * 220,
+      life: 0.5
+    });
+  }
+}
+
+function update(dt) {
+  camera += dt * 60;
+  spawnTimer -= dt;
+
+  if (!boss && stage <= 3 && spawnTimer <= 0) {
+    addTarget();
+    spawnTimer = Math.max(0.5, 1.5 - stage * 0.2);
+  }
+
+  for (let i = targets.length - 1; i >= 0; i--) {
+    const t = targets[i];
+    t.x -= t.speed * dt;
+
+    if (t.x < -30) {
+      targets.splice(i, 1);
+      health -= 10;
+    }
+  }
+
+  if (kills >= stage * 10 && stage < 3) {
+    stage++;
+    targets = [];
+    spawnTimer = 1;
+  }
+
+  if (kills >= 30 && !boss && stage === 3) {
+    stage = 4;
+    targets = [];
+    createBoss();
+  }
+
+  if (boss) {
+    boss.phase += dt;
+    boss.y = 240 + Math.sin(boss.phase * 2) * 100;
+  }
+
+  particles.forEach(p => {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt;
+  });
+
+  particles = particles.filter(p => p.life > 0);
+
+  if (health <= 0) {
+    running = false;
+    statusText.textContent = "GAME OVER! Score: " + score;
+  }
+}
+
+function drawBackground() {
+  ctx.fillStyle = preservation ? "#111" : "#17283f";
+  ctx.fillRect(0, 0, 900, 500);
+
+  // Automatically scrolling arcade environment
+  for (let i = 0; i < 14; i++) {
+    const x = ((i * 100 - camera) % 1400 + 1400) % 1400 - 100;
+    const height = 110 + (i * 47) % 180;
+
+    ctx.fillStyle = preservation ? "#333" : "#314e69";
+    ctx.fillRect(x, 400 - height, 75, height);
+
+    ctx.fillStyle = "#ffe28a";
+    for (let y = 420 - height; y < 380; y += 30) {
+      ctx.fillRect(x + 12, y, 12, 12);
+      ctx.fillRect(x + 43, y, 12, 12);
+    }
+  }
+
+  ctx.fillStyle = "#263548";
+  ctx.fillRect(0, 400, 900, 100);
+
+  ctx.strokeStyle = "#f8d46b";
+  ctx.lineWidth = 5;
+  ctx.setLineDash([35, 30]);
+  ctx.beginPath();
+  ctx.moveTo(0, 455);
+  ctx.lineTo(900, 455);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function drawTargets() {
+  targets.forEach(t => {
+    ctx.fillStyle = "#e84b4b";
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, t.radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, 13, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(t.x - 10, t.y);
+    ctx.lineTo(t.x + 10, t.y);
+    ctx.moveTo(t.x, t.y - 10);
+    ctx.lineTo(t.x, t.y + 10);
+    ctx.stroke();
+  });
+}
+
+function drawBoss() {
+  if (!boss) return;
+
+  ctx.fillStyle = "#8e44ad";
+  ctx.beginPath();
+  ctx.arc(boss.x, boss.y, boss.radius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#ffda3d";
+  ctx.beginPath();
+  ctx.arc(boss.x, boss.y, 20, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#222";
+  ctx.fillRect(250, 50, 400, 20);
+
+  ctx.fillStyle = "#ff4444";
+  ctx.fillRect(
+    250, 50,
+    400 * boss.hp / boss.maxHp,
+    20
+  );
+
+  ctx.fillStyle = "white";
+  ctx.font = "bold 18px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("FINAL BOSS", 450, 40);
+}
+
+function drawCrosshair() {
+  const {x, y} = crosshair;
+
+  ctx.strokeStyle = "#00ff99";
+  ctx.lineWidth = 3;
+
+  ctx.beginPath();
+  ctx.arc(x, y, 20, 0, Math.PI * 2);
+  ctx.moveTo(x - 32, y);
+  ctx.lineTo(x - 10, y);
+  ctx.moveTo(x + 10, y);
+  ctx.lineTo(x + 32, y);
+  ctx.moveTo(x, y - 32);
+  ctx.lineTo(x, y - 10);
+  ctx.moveTo(x, y + 10);
+  ctx.lineTo(x, y + 32);
+  ctx.stroke();
+}
+
+function drawHUD() {
+  ctx.textAlign = "left";
+  ctx.font = "bold 20px Arial";
+  ctx.fillStyle = "white";
+
+  ctx.fillText("SCORE: " + score, 20, 30);
+  ctx.fillText("HEALTH: " + health, 20, 60);
+  ctx.fillText("AMMO: " + ammo + "/" + maxAmmo, 730, 30);
+  ctx.fillText("STAGE: " + stage, 730, 60);
+
+  if (ammo === 0) {
+    ctx.fillStyle = "#ff5555";
+    ctx.font = "bold 35px Arial";
+    ctx.textAlign = "center";
+    ctx.fillText("RELOAD!", 450, 300);
+  }
+}
+
+function drawParticles() {
+  particles.forEach(p => {
+    ctx.fillStyle = "#ffdf55";
+    ctx.fillRect(p.x, p.y, 5, 5);
+  });
+}
+
+function winGame() {
+  running = false;
+  statusText.textContent =
+    "VICTORY! FINAL SCORE: " + score;
+}
+
+function loop(time) {
+  if (!running) return;
+
+  const dt = Math.min((time - lastTime) / 1000, 0.05);
+  lastTime = time;
+
+  update(dt);
+  drawBackground();
+  drawTargets();
+  drawBoss();
+  drawParticles();
+  drawCrosshair();
+  drawHUD();
+
+  statusText.textContent =
+    "Score: " + score +
+    " | Stage: " + stage +
+    " | Health: " + health;
+
+  if (running) requestAnimationFrame(loop);
+}
+
+// Initial title screen
+drawBackground();
+ctx.fillStyle = "white";
+ctx.textAlign = "center";
+ctx.font = "bold 40px Arial";
+ctx.fillText("SAMMY'S EVIL FIGHTER", 450, 220);
+ctx.font = "22px Arial";
+ctx.fillText("PRESS START GAME", 450, 270);
+</script>
+</body>
+</html>
